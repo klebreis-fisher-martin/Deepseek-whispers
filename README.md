@@ -27,10 +27,17 @@
 
 ## 安装
 
-Coopanion 的扩展目录是 `Coopanion/data/extensions`(一个 pnpm workspace)。两种方式:
+Coopanion 的扩展目录是 `Coopanion/data/extensions`(一个 pnpm workspace)。三种方式:
 
-1. WebUI 的扩展页安装(发布到 npm 后)。
-2. 本地链接:
+1. 从 npm 安装(推荐):
+
+```powershell
+cd <Coopanion>\data\extensions
+pnpm add cortico-world-feiyu-whispers
+```
+
+2. Coopanion WebUI 的扩展页搜索 `cortico-world-feiyu-whispers` 安装。
+3. 本地链接开发:
 
 ```powershell
 cd <Coopanion>\data\extensions
