@@ -17,10 +17,10 @@ const NOON = Date.parse('2026-01-01T04:00:00Z'); // 12:00 +08:00
 const NIGHT = Date.parse('2026-01-01T15:00:00Z'); // 23:00 +08:00
 
 describe('肥鱼语录语料', () => {
-  it('收录 59 句(id 1–47 原文 + 48–59 补写),id 与文本都不重复', () => {
-    expect(FEIYU_LINES).toHaveLength(59);
-    expect(new Set(FEIYU_LINES.map((line) => line.id)).size).toBe(59);
-    expect(new Set(FEIYU_LINES.map((line) => line.text)).size).toBe(59);
+  it('收录 89 句(id 1–47 原文 + 48–59 补写 + 60–89 互动/拖拽/OS),id 与文本都不重复', () => {
+    expect(FEIYU_LINES).toHaveLength(89);
+    expect(new Set(FEIYU_LINES.map((line) => line.id)).size).toBe(89);
+    expect(new Set(FEIYU_LINES.map((line) => line.text)).size).toBe(89);
   });
 
   it('每句都有至少一个主题标签,文本非空', () => {
@@ -57,9 +57,20 @@ describe('肥鱼语录语料', () => {
     expect(second.text).not.toBe(first.text);
   });
 
-  it('摸头池包含被摸头的台词,睡觉池包含犯困台词', () => {
-    expect(linesForTags(touchTags('pet')).some((line) => line.id === 16)).toBe(true);
+  it('摸头池包含被摸头的台词与回嘴,睡觉池包含犯困台词', () => {
+    const petPool = linesForTags(touchTags('pet'));
+    expect(petPool.some((line) => line.id === 16)).toBe(true);
+    expect(petPool.some((line) => line.id === 54)).toBe(true);
     expect(linesForTags(['sleep', 'night']).some((line) => line.id === 28)).toBe(true);
+  });
+
+  it('甩出去/放下走拖拽反应池,戳一下走回嘴池', () => {
+    const throwPool = linesForTags(touchTags('throw'));
+    expect(throwPool.some((line) => line.id === 78)).toBe(true);
+    const dropPool = linesForTags(touchTags('drop'));
+    expect(dropPool.some((line) => line.id === 80)).toBe(true);
+    const pokePool = linesForTags(touchTags('poke'));
+    expect(pokePool.some((line) => line.id === 72)).toBe(true);
   });
 
   it('夜间专用句(45)只在夜间窗口内允许出现', () => {

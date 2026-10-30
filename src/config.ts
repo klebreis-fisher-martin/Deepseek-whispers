@@ -9,6 +9,8 @@ export interface FeiyuConfigSection {
   minGapActiveSeconds: number;
   /** 有动作/互动时,满足间隔后仍只有这个概率真的开口。 */
   triggerChance: number;
+  /** 直接摸头/戳/甩/放下时的开口概率;默认必定回一句,让互动有反馈。 */
+  touchChance: number;
   /** 没有动作时,多久之后自己嘀咕一句(随机区间的下限)。 */
   ambientMinSeconds: number;
   /** 没有动作时,多久之后自己嘀咕一句(随机区间的上限)。 */
@@ -38,6 +40,7 @@ export const FEIYU_DEFAULTS: FeiyuConfigSection = {
   minGapDefaultSeconds: 10,
   minGapActiveSeconds: 5,
   triggerChance: 0.35,
+  touchChance: 1,
   ambientMinSeconds: 75,
   ambientMaxSeconds: 180,
   userBusySeconds: 25,
@@ -78,7 +81,15 @@ export const FEIYU_CONFIG_GROUP: ConfigGroup = {
       'worlds.feiyu-whispers.triggerChance': {
         type: 'number',
         title: '动作触发概率',
-        description: '有互动或动作且间隔已够时,真的冒出一句的概率;0 到 1。',
+        description: '有动作(睡觉、走动、爱心等)且间隔已够时,真的冒出一句的概率;0 到 1。',
+        minimum: 0,
+        maximum: 1,
+        'x-hot': true,
+      },
+      'worlds.feiyu-whispers.touchChance': {
+        type: 'number',
+        title: '互动回应概率',
+        description: '直接摸头/戳/甩出去/放下时开口的概率;默认 1,每次互动都回一句。',
         minimum: 0,
         maximum: 1,
         'x-hot': true,
@@ -136,7 +147,7 @@ export const FEIYU_CONFIG_GROUP: ConfigGroup = {
         title: '工作提醒用第几句',
         description: '默认 46(工作时间太久了)。改成别的 id 可以换成别的固定提醒。',
         minimum: 1,
-        maximum: 59,
+        maximum: 89,
         'x-hot': true,
       },
       'worlds.feiyu-whispers.nightCareStartHour': {

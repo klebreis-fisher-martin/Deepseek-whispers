@@ -172,16 +172,37 @@ describe('肥鱼语录 World', () => {
     await world.stop();
   });
 
-  it('概率为 0 时动作也不触发', async () => {
+  it('互动概率为 0 时摸了也不触发', async () => {
     const bridge = new FakeBridge();
     const host = new FakeHost();
-    const world = makeWorld(bridge, { triggerChance: 0 });
+    const world = makeWorld(bridge, { triggerChance: 0, touchChance: 0 });
     await world.start(host);
     host.emit('desktop-pet.touch', { touch: { kind: 'poke' } }, '戳了一下');
     clock += 20_000;
     world.tickAt(clock);
     await flush();
     expect(bridge.said).toHaveLength(0);
+    await world.stop();
+  });
+
+  it('默认互动必定回一句:摸头、甩出去都各有反馈', async () => {
+    petConfigFile({ wakeOn: 'poke' });
+    const bridge = new FakeBridge();
+    const host = new FakeHost();
+    const world = makeWorld(bridge, { triggerChance: 0, touchChance: 1, minGapDefaultSeconds: 10 });
+    await world.start(host);
+
+    world.notifyTouch('pet');
+    clock += 500;
+    world.tickAt(clock);
+    await flush();
+    expect(bridge.said).toHaveLength(1);
+
+    world.notifyTouch('throw');
+    clock += 15_000;
+    world.tickAt(clock);
+    await flush();
+    expect(bridge.said).toHaveLength(2);
     await world.stop();
   });
 

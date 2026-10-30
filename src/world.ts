@@ -222,7 +222,10 @@ export class FeiyuWhispersWorld implements World {
       // 同一动作 1.5 秒内的连击只算一次。
       if (handled.some((item) => item.kind === touch.kind && touch.at - item.at < 1500)) continue;
       handled.push(touch);
-      this.consider(touchTags(touch.kind), touch.kind as TriggerKind, now, pet, { boost: 3 });
+      this.consider(touchTags(touch.kind), touch.kind as TriggerKind, now, pet, {
+        boost: 3,
+        chance: this.touchChance(),
+      });
     }
   }
 
@@ -264,7 +267,7 @@ export class FeiyuWhispersWorld implements World {
         }
         const trigger: TriggerKind =
           kind === 'pet' || kind === 'throw' || kind === 'drop' ? kind : 'poke';
-        this.consider(touchTags(kind), trigger, now, pet, { boost: 3 });
+        this.consider(touchTags(kind), trigger, now, pet, { boost: 3, chance: this.touchChance() });
         return;
       }
       case PET_MESSAGE:
@@ -301,7 +304,7 @@ export class FeiyuWhispersWorld implements World {
     kind: TriggerKind,
     now: number,
     pet: PetConfig,
-    opts: { boost: number; always?: boolean },
+    opts: { boost: number; always?: boolean; chance?: number },
   ): void {
     if (this.inFlight) return;
     if (!this.bridge.connected()) return;
@@ -314,7 +317,8 @@ export class FeiyuWhispersWorld implements World {
     const busy = this.seconds(this.opts.cfg.userBusySeconds) * 1000;
     if (now - this.lastUserInputAt < busy) return;
 
-    if (!opts.always && this.random() >= this.chance(this.opts.cfg.triggerChance)) return;
+    const probability = opts.chance ?? this.chance(this.opts.cfg.triggerChance);
+    if (!opts.always && this.random() >= probability) return;
 
     const line = chooseLine({
       tags,
@@ -492,6 +496,12 @@ export class FeiyuWhispersWorld implements World {
     const number = Number(value);
     if (!Number.isFinite(number)) return 0.35;
     return Math.min(1, Math.max(0, number));
+  }
+
+  /** 直接互动默认 100% 回一句;想保留随机就把它调低。 */
+  private touchChance(): number {
+    const raw = Number(this.opts.cfg.touchChance);
+    return Number.isFinite(raw) ? Math.min(1, Math.max(0, raw)) : 1;
   }
 
   private seconds(value: unknown, fallback = 0): number {
