@@ -15,6 +15,18 @@ export interface FeiyuConfigSection {
   ambientMaxSeconds: number;
   /** 你刚发过消息后,至少安静这么多秒,避免和 Coo 的回复抢气泡。 */
   userBusySeconds: number;
+  /** 同一句说完后,至少隔多少秒才会再次出现。 */
+  lineCooldownSeconds: number;
+  /** 最近说过的几句会额外降权,记忆的句数。 */
+  avoidRecentLines: number;
+  /** 「工作时间太久了…」固定日程,每多少分钟一次;0 = 关闭。 */
+  workReminderMinutes: number;
+  /** 固定日程那一条的语料 id(默认 46)。 */
+  workReminderLineId: number;
+  /** 「记得好好休息…」这类夜间专用句子从几点开始允许出现。 */
+  nightCareStartHour: number;
+  /** 夜间专用句子到几点结束(不含)。 */
+  nightCareEndHour: number;
   /** 是否把最近嘀咕过的台词写进环境提示词,让模型「知道」自己说过什么。 */
   awareness: boolean;
   /** 环境提示词里最多列几句最近的嘀咕。 */
@@ -29,6 +41,12 @@ export const FEIYU_DEFAULTS: FeiyuConfigSection = {
   ambientMinSeconds: 75,
   ambientMaxSeconds: 180,
   userBusySeconds: 25,
+  lineCooldownSeconds: 1500,
+  avoidRecentLines: 6,
+  workReminderMinutes: 40,
+  workReminderLineId: 46,
+  nightCareStartHour: 22,
+  nightCareEndHour: 6,
   awareness: true,
   maxRecentLines: 2,
 };
@@ -87,6 +105,54 @@ export const FEIYU_CONFIG_GROUP: ConfigGroup = {
         description: '你刚打字/说话/回答过,就先让 Coo 自己聊,这段时间内不加旁白。',
         minimum: 0,
         maximum: 600,
+        'x-hot': true,
+      },
+      'worlds.feiyu-whispers.lineCooldownSeconds': {
+        type: 'number',
+        title: '同一句的冷却时间(秒)',
+        description: '同一句说完后至少隔这么久才可能再次出现,防止反复刷同一句。',
+        minimum: 0,
+        maximum: 21600,
+        'x-hot': true,
+      },
+      'worlds.feiyu-whispers.avoidRecentLines': {
+        type: 'number',
+        title: '最近几句额外降权',
+        description: '最近说过的句子会被明显压低权重;这里填记住几句。',
+        minimum: 0,
+        maximum: 20,
+        'x-hot': true,
+      },
+      'worlds.feiyu-whispers.workReminderMinutes': {
+        type: 'number',
+        title: '工作提醒间隔(分钟)',
+        description: '「工作时间太久了…」这一句固定每隔多少分钟出现一次;0 = 关闭。',
+        minimum: 0,
+        maximum: 480,
+        'x-hot': true,
+      },
+      'worlds.feiyu-whispers.workReminderLineId': {
+        type: 'number',
+        title: '工作提醒用第几句',
+        description: '默认 46(工作时间太久了)。改成别的 id 可以换成别的固定提醒。',
+        minimum: 1,
+        maximum: 59,
+        'x-hot': true,
+      },
+      'worlds.feiyu-whispers.nightCareStartHour': {
+        type: 'number',
+        title: '夜间台词开始时间(点)',
+        description: '「记得好好休息…」这类夜间专用句子从几点开始允许出现,默认 22。',
+        minimum: 0,
+        maximum: 23,
+        'x-hot': true,
+      },
+      'worlds.feiyu-whispers.nightCareEndHour': {
+        type: 'number',
+        title: '夜间台词结束时间(点)',
+        description: '夜间专用句子到几点结束(不含),默认 6。',
+        minimum: 0,
+        maximum: 23,
         'x-hot': true,
       },
       'worlds.feiyu-whispers.awareness': {

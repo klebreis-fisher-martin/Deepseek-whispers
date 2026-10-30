@@ -231,6 +231,45 @@ describe('肥鱼语录 World', () => {
     await world.stop();
   });
 
+  it('摸头/戳这类页面互动走即时桥接,不用等事件被投递', async () => {
+    petConfigFile({ wakeOn: 'poke' });
+    const bridge = new FakeBridge();
+    const host = new FakeHost();
+    const world = makeWorld(bridge);
+    await world.start(host);
+
+    world.notifyTouch('pet');
+    clock += 500;
+    world.tickAt(clock);
+    await flush();
+    expect(bridge.said).toHaveLength(1);
+    await world.stop();
+  });
+
+  it('工作提醒按固定间隔出现,不受动作概率影响', async () => {
+    petConfigFile({ wakeOn: 'poke' });
+    const bridge = new FakeBridge();
+    const host = new FakeHost();
+    const world = makeWorld(bridge, {
+      ambientMinSeconds: 60_000,
+      ambientMaxSeconds: 60_000,
+      workReminderMinutes: 40,
+    });
+    await world.start(host);
+
+    clock += 39 * 60 * 1000;
+    world.tickAt(clock);
+    await flush();
+    expect(bridge.said).toHaveLength(0);
+
+    clock += 61 * 1000;
+    world.tickAt(clock);
+    await flush();
+    expect(bridge.said).toHaveLength(1);
+    expect(bridge.said[0]).toContain(FEIYU_LINES.find((line) => line.id === 46)!.text);
+    await world.stop();
+  });
+
   it('超过 15 分钟后不再把旧台词写进提示词', async () => {
     const bridge = new FakeBridge();
     const host = new FakeHost();

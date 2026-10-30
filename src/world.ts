@@ -3,6 +3,8 @@
  *
  * - 不调用模型,不推会被投递给模型的台词事件;台词只进桌宠气泡和聊天页记录。
  * - 负责「什么时候能说」:回应模式、间隔、概率、你说话后的安静时间。
+ * - 负责「挑哪一句」:全部语料加权,动作偏向对应主题;同一句有冷却,
+ *   夜间专用句只在夜间出现,工作提醒按固定间隔出现。
  * - 负责「让模型知道」:把最近嘀咕写进 envPromptVars,只增加输入前缀,不触发唤醒。
  */
 import { readFileSync } from 'node:fs';
@@ -22,7 +24,8 @@ import {
   GENERAL_TAGS,
   activityTags,
   ambientTags,
-  pickLine,
+  chooseLine,
+  lineById,
   touchTags,
   type FeiyuLine,
   type TriggerKind,
@@ -60,7 +63,13 @@ interface SelfMeta {
 }
 
 interface RecentLine {
+  id: number;
   text: string;
+  at: number;
+}
+
+interface QueuedTouch {
+  kind: string;
   at: number;
 }
 
@@ -90,10 +99,14 @@ export class FeiyuWhispersWorld implements World {
   private lastBubbleEndAt = 0;
   private lastUserInputAt = 0;
   private nextAmbientAt = 0;
+  private nextWorkReminderAt = 0;
   private lastMode: WakeMode = 'off';
   private cachedPet: { at: number; value: PetConfig } | null = null;
-  private lastSpoken: string[] = [];
+  private readonly lastSpokenAt = new Map<number, number>();
+  private recentIds: number[] = [];
   private recent: RecentLine[] = [];
+  private touchQueue: QueuedTouch[] = [];
+  private lastBridgeTouch: QueuedTouch | null = null;
 
   constructor(private readonly opts: FeiyuWorldOptions) {
     this.bridge =
@@ -101,6 +114,7 @@ export class FeiyuWhispersWorld implements World {
       new DesktopPetBridge({
         repoRoot: opts.repoRoot,
         log: (message) => this.log('warn', message),
+        onTouch: (kind) => this.notifyTouch(kind),
       });
     // 装配时所有 World 先 create、后 start。这里尽早套上原型,
     // 才能赶在桌宠页面连上、应用第一次调用 snapshot 之前拿到实例。
@@ -145,6 +159,12 @@ export class FeiyuWhispersWorld implements World {
     this.lastBubbleEndAt = 0;
     this.lastMode = 'off';
     this.nextAmbientAt = now + this.ambientDelayMs();
+    this.nextWorkReminderAt = this.workIntervalMs() > 0 ? now + this.workIntervalMs() : 0;
+    this.lastSpokenAt.clear();
+    this.recentIds = [];
+    this.recent = [];
+    this.touchQueue = [];
+    this.lastBridgeTouch = null;
 
     const attached = await (this.early ?? this.bridge.attach());
     this.early = null;
@@ -163,21 +183,54 @@ export class FeiyuWhispersWorld implements World {
     this.host = undefined;
   }
 
-  /** 一次轮询:读事件、判定间隔、到点就嘀咕。@internal 测试直接调。 */
+  /** 一次轮询:处理即时互动、读事件、工作提醒 / 自然嘀咕。@internal 测试直接调。 */
   tickAt(now: number): void {
     if (!this.host) return;
     const pet = this.petConfig(now);
+    this.drainTouches(now, pet);
     this.pollEvents(now, pet);
+
     const mode = wakeModeOf(pet.wakeOn);
     if (mode === 'off') {
       this.lastMode = 'off';
+      // 安静模式不攒工作提醒:恢复回应时重新从头计时。
+      const interval = this.workIntervalMs();
+      if (interval > 0) this.nextWorkReminderAt = now + interval;
       return;
     }
     if (this.lastMode === 'off') this.nextAmbientAt = now + this.ambientDelayMs();
     this.lastMode = mode;
+
+    this.fireWorkReminderIfDue(now, pet, mode);
+
     if (now < this.nextAmbientAt) return;
     this.nextAmbientAt = now + this.ambientDelayMs();
-    this.consider(ambientTags(new Date(now)), 'ambient', now, pet, true);
+    this.consider(ambientTags(new Date(now)), 'ambient', now, pet, { boost: 1, always: true });
+  }
+
+  /** 桥接层回调:桌宠页面发生摸头/戳/甩/放下时立即入队。@internal */
+  notifyTouch(kind: string): void {
+    this.enqueueTouch(kind);
+  }
+
+  private drainTouches(now: number, pet: PetConfig): void {
+    const queue = this.touchQueue;
+    this.touchQueue = [];
+    if (!queue.length) return;
+    const handled: QueuedTouch[] = [];
+    for (const touch of queue) {
+      // 同一动作 1.5 秒内的连击只算一次。
+      if (handled.some((item) => item.kind === touch.kind && touch.at - item.at < 1500)) continue;
+      handled.push(touch);
+      this.consider(touchTags(touch.kind), touch.kind as TriggerKind, now, pet, { boost: 3 });
+    }
+  }
+
+  private enqueueTouch(kind: string): void {
+    if (kind !== 'poke' && kind !== 'pet' && kind !== 'throw' && kind !== 'drop') return;
+    const at = this.now();
+    this.touchQueue.push({ kind, at });
+    this.lastBridgeTouch = { kind, at };
   }
 
   private pollEvents(now: number, pet: PetConfig): void {
@@ -201,9 +254,17 @@ export class FeiyuWhispersWorld implements World {
       case PET_TOUCH: {
         const meta = (event.meta ?? {}) as { touch?: { kind?: string } };
         const kind = meta.touch?.kind ?? '';
+        // 桥接已经即时处理过同一次互动时,不再重复触发。
+        if (
+          this.lastBridgeTouch &&
+          this.lastBridgeTouch.kind === kind &&
+          now - this.lastBridgeTouch.at < 5000
+        ) {
+          return;
+        }
         const trigger: TriggerKind =
           kind === 'pet' || kind === 'throw' || kind === 'drop' ? kind : 'poke';
-        this.consider(touchTags(kind), trigger, now, pet);
+        this.consider(touchTags(kind), trigger, now, pet, { boost: 3 });
         return;
       }
       case PET_MESSAGE:
@@ -223,12 +284,12 @@ export class FeiyuWhispersWorld implements World {
         } else if (meta.kind === 'ask') {
           this.lastBubbleEndAt = Math.max(this.lastBubbleEndAt, stamp + 4000);
         } else if (meta.kind === 'activity') {
-          this.consider(activityTags(meta.steps ?? []), 'activity', now, pet);
+          this.consider(activityTags(meta.steps ?? []), 'activity', now, pet, { boost: 3 });
         }
         return;
       }
       case PET_FIGURE:
-        this.consider(GENERAL_TAGS, 'figure', now, pet);
+        this.consider(GENERAL_TAGS, 'figure', now, pet, { boost: 1 });
         return;
       default:
         return;
@@ -240,7 +301,7 @@ export class FeiyuWhispersWorld implements World {
     kind: TriggerKind,
     now: number,
     pet: PetConfig,
-    ambient = false,
+    opts: { boost: number; always?: boolean },
   ): void {
     if (this.inFlight) return;
     if (!this.bridge.connected()) return;
@@ -253,20 +314,64 @@ export class FeiyuWhispersWorld implements World {
     const busy = this.seconds(this.opts.cfg.userBusySeconds) * 1000;
     if (now - this.lastUserInputAt < busy) return;
 
-    if (!ambient && this.random() >= this.chance(this.opts.cfg.triggerChance)) return;
+    if (!opts.always && this.random() >= this.chance(this.opts.cfg.triggerChance)) return;
 
-    this.speak(tags, kind, now, pet);
+    const line = chooseLine({
+      tags,
+      now,
+      timezone: this.opts.timezone,
+      lastSpokenAt: this.lastSpokenAt,
+      recentIds: this.recentIds,
+      cooldownMs: this.cooldownMs(),
+      nightStartHour: this.hour(this.opts.cfg.nightCareStartHour, 22),
+      nightEndHour: this.hour(this.opts.cfg.nightCareEndHour, 6),
+      tagBoost: opts.boost,
+      random: () => this.random(),
+    });
+    this.speak(line, kind, now, pet);
   }
 
-  private speak(tags: readonly string[], kind: TriggerKind, now: number, pet: PetConfig): void {
-    const line = pickLine(tags, this.lastSpoken, () => this.random());
+  private fireWorkReminderIfDue(now: number, pet: PetConfig, mode: WakeMode): void {
+    const interval = this.workIntervalMs();
+    if (interval <= 0) return;
+    if (this.nextWorkReminderAt <= 0) {
+      this.nextWorkReminderAt = now + interval;
+      return;
+    }
+    if (now < this.nextWorkReminderAt) return;
+
+    const wanted = this.line(this.opts.cfg.workReminderLineId, 46);
+    if (!wanted) {
+      this.nextWorkReminderAt = now + interval;
+      return;
+    }
+    if (!this.canSpeak(now, pet, mode)) {
+      // 被间隔或「你正在说话」挡住就保持到期状态,下一次 tick 继续试。
+      return;
+    }
+    this.speak(wanted, 'scheduled', now, pet);
+    this.nextWorkReminderAt = now + interval;
+  }
+
+  private canSpeak(now: number, pet: PetConfig, mode: WakeMode): boolean {
+    if (this.inFlight) return false;
+    if (!this.bridge.connected()) return false;
+    if (mode === 'off') return false;
+    const gap = minGapSeconds(mode, this.opts.cfg) * 1000;
+    if (now - this.lastBubbleEndAt < gap) return false;
+    const busy = this.seconds(this.opts.cfg.userBusySeconds) * 1000;
+    return now - this.lastUserInputAt >= busy;
+  }
+
+  private speak(line: FeiyuLine, kind: TriggerKind, now: number, pet: PetConfig): void {
     const script = line.expression ? `【${line.expression}】${line.text}` : line.text;
     const expected = durationMs(line.text, pet.bubbleSpeed) + 200;
 
     this.inFlight = true;
     this.lastBubbleEndAt = now + expected;
-    this.lastSpoken = [...this.lastSpoken, line.text].slice(-3);
-    this.recent = [...this.recent, { text: line.text, at: now }].slice(-12);
+    this.lastSpokenAt.set(line.id, now);
+    this.recentIds = [...this.recentIds, line.id].slice(-this.avoidRecentCount());
+    this.recent = [...this.recent, { id: line.id, text: line.text, at: now }].slice(-12);
     this.nextAmbientAt = now + this.ambientDelayMs();
 
     void this.pushSpoke(line, kind, now);
@@ -276,6 +381,8 @@ export class FeiyuWhispersWorld implements World {
         if (ok) return;
         // 没接上或页面关闭:回滚间隔,别把之后的话也一起吞掉。
         this.lastBubbleEndAt = Math.min(this.lastBubbleEndAt, now);
+        this.lastSpokenAt.delete(line.id);
+        this.recentIds = this.recentIds.filter((id) => id !== line.id);
         this.recent = this.recent.filter((item) => item.at !== now);
         this.log('warn', '气泡没有送达(桌宠页面未连接?)。');
       })
@@ -349,6 +456,30 @@ export class FeiyuWhispersWorld implements World {
     }
     this.cachedPet = { at: now, value };
     return value;
+  }
+
+  private workIntervalMs(): number {
+    const minutes = this.seconds(this.opts.cfg.workReminderMinutes, 0);
+    return minutes > 0 ? Math.min(480, minutes) * 60_000 : 0;
+  }
+
+  private cooldownMs(): number {
+    return this.seconds(this.opts.cfg.lineCooldownSeconds, 1500) * 1000;
+  }
+
+  private avoidRecentCount(): number {
+    return Math.round(this.seconds(this.opts.cfg.avoidRecentLines, 6));
+  }
+
+  private hour(value: unknown, fallback: number): number {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.min(23, Math.max(0, Math.round(number)));
+  }
+
+  private line(value: unknown, fallback: number): FeiyuLine | undefined {
+    const id = Number(value);
+    return lineById(Number.isFinite(id) ? Math.round(id) : fallback);
   }
 
   private ambientDelayMs(): number {

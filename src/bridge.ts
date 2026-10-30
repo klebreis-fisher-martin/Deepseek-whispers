@@ -40,6 +40,8 @@ export interface DesktopPetBridgeOptions {
   /** Core 代码根目录;Coopanion 里是 <app>/build/cortico。 */
   repoRoot: string;
   log?: (message: string) => void;
+  /** 摸头/戳/甩/放下会立刻从这里通知,不用等事件被投递后才看到。 */
+  onTouch?: (kind: string) => void;
 }
 
 export class DesktopPetBridge implements PetBubbleSink {
@@ -108,13 +110,17 @@ export class DesktopPetBridge implements PetBubbleSink {
     const proto = ctor.prototype as Record<string, unknown> & { [PATCH_MARK]?: true };
     if (proto[PATCH_MARK]) return false;
 
-    for (const name of ['snapshot', 'onPage', 'envPromptVars', 'petState', 'start'] as const) {
+    for (const name of ['snapshot', 'onPage', 'onTouch', 'envPromptVars', 'petState', 'start'] as const) {
       const original = proto[name];
       if (typeof original !== 'function') continue;
       const bridge = this;
       const wrapper = function (this: unknown, ...args: unknown[]): unknown {
         bridge.capture(this);
-        return (original as (...a: unknown[]) => unknown).apply(this, args);
+        const result = (original as (...a: unknown[]) => unknown).apply(this, args);
+        // 页面侧的摸头/戳/甩/放下在默认模式下原本是 piggyback 事件,
+        // 要等下一次投递才进事件库;这里当场记下来,气泡才能立即响应。
+        if (name === 'onTouch') bridge.touch(this, args[0]);
+        return result;
       };
       proto[name] = wrapper;
       this.patches.push({
@@ -135,6 +141,16 @@ export class DesktopPetBridge implements PetBubbleSink {
     if (typeof candidate.say !== 'function') return;
     // 应用只创建一个宠物实例;后到的 snapshot 等调用不要把引用换掉。
     if (!this.pet) this.pet = candidate;
+  }
+
+  /** 桌宠页面的互动消息:只转发真正会生成「互动事件」的四种。 */
+  private touch(pet: unknown, msg: unknown): void {
+    const enabled = (pet as { cfg?: { touch?: { enabled?: boolean } } } | null)?.cfg?.touch?.enabled;
+    if (enabled === false) return;
+    const kind = (msg as { kind?: unknown } | null)?.kind;
+    if (typeof kind !== 'string') return;
+    if (kind !== 'poke' && kind !== 'pet' && kind !== 'throw' && kind !== 'drop') return;
+    this.opts.onTouch?.(kind);
   }
 }
 

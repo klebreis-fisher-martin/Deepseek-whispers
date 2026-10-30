@@ -39,6 +39,46 @@ export function beatsDurationMs(beats: readonly { text?: string }[], bubbleSpeed
   return total + Math.max(0, beats.length - 1) * 350;
 }
 
+/** 按时区取小时(0–23)。时区名无效时退回本机时区。 */
+export function localHour(at: number, timezone: string): number {
+  try {
+    const hour = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      hour: 'numeric',
+      hour12: false,
+    }).format(new Date(at));
+    const value = Number(hour);
+    return Number.isFinite(value) ? ((value % 24) + 24) % 24 : new Date(at).getHours();
+  } catch {
+    return new Date(at).getHours();
+  }
+}
+
+/** 小时是否落在 [start, end) 区间;start > end 表示跨午夜(如 22 → 6)。 */
+export function inHourWindow(hour: number, start: number, end: number): boolean {
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start === end) return true;
+  const s = ((Math.floor(start) % 24) + 24) % 24;
+  const e = ((Math.floor(end) % 24) + 24) % 24;
+  const h = ((Math.floor(hour) % 24) + 24) % 24;
+  return s < e ? h >= s && h < e : h >= s || h < e;
+}
+
+/** 带权重的随机;全为 0 时退回等概率。 */
+export function weightedPick<T>(items: readonly T[], weight: (item: T) => number, random: () => number): T | undefined {
+  if (!items.length) return undefined;
+  const weights = items.map((item) => Math.max(0, Number(weight(item)) || 0));
+  const total = weights.reduce((sum, value) => sum + value, 0);
+  if (total <= 0) return items[Math.min(items.length - 1, Math.floor(random() * items.length))];
+  let ticket = Math.max(0, Math.min(1, random())) * total;
+  for (let index = 0; index < items.length; index++) {
+    const value = weights[index]!;
+    if (value <= 0) continue;
+    ticket -= value;
+    if (ticket <= 0) return items[index];
+  }
+  return items[items.length - 1];
+}
+
 /** 在 [minSeconds, maxSeconds] 里随机取毫秒;两值反了会自动交换。 */
 export function jitterMs(
   random: () => number,

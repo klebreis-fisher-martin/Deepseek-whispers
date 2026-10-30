@@ -3,9 +3,12 @@ import {
   beatsDurationMs,
   durationMs,
   formatClock,
+  inHourWindow,
   jitterMs,
+  localHour,
   minGapSeconds,
   wakeModeOf,
+  weightedPick,
 } from '../src/policy.ts';
 
 describe('回应模式映射', () => {
@@ -51,5 +54,28 @@ describe('气泡时长与随机', () => {
   it('按指定时区显示 HH:MM', () => {
     expect(formatClock(Date.parse('2026-01-01T12:00:00Z'), 'Asia/Shanghai')).toBe('20:00');
     expect(formatClock(Date.parse('2026-01-01T12:00:00Z'), 'Not/AZone')).toMatch(/^\d{2}:\d{2}$/);
+  });
+});
+
+describe('夜间窗口与加权', () => {
+  it('按指定时区取小时', () => {
+    expect(localHour(Date.parse('2026-01-01T12:00:00Z'), 'Asia/Shanghai')).toBe(20);
+    expect(localHour(Date.parse('2026-01-01T12:00:00Z'), 'UTC')).toBe(12);
+  });
+
+  it('22→6 跨午夜窗口', () => {
+    expect(inHourWindow(23, 22, 6)).toBe(true);
+    expect(inHourWindow(2, 22, 6)).toBe(true);
+    expect(inHourWindow(12, 22, 6)).toBe(false);
+    expect(inHourWindow(6, 22, 6)).toBe(false);
+    expect(inHourWindow(12, 9, 18)).toBe(true);
+    expect(inHourWindow(8, 9, 18)).toBe(false);
+  });
+
+  it('权重为 0 的项不会被选中;全 0 时退回等概率', () => {
+    const items = ['a', 'b', 'c'];
+    expect(weightedPick(items, (item) => (item === 'a' ? 0 : 1), () => 0)).toBe('b');
+    expect(weightedPick(items, () => 0, () => 0.5)).toBe('b');
+    expect(weightedPick([], () => 1, () => 0)).toBeUndefined();
   });
 });

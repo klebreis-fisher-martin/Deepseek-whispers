@@ -1,6 +1,6 @@
 {
   "name": "cortico-world-feiyu-whispers",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Coopanion 桌宠的肥鱼语录:按动作和时段挑一句预置台词放进气泡,不调用模型,不花 token",
   "license": "MIT",

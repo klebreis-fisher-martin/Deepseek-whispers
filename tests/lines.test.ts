@@ -4,16 +4,23 @@ import {
   GENERAL_TAGS,
   activityTags,
   ambientTags,
+  chooseLine,
+  lineAllowedAt,
+  lineById,
   linesForTags,
   pickLine,
   touchTags,
 } from '../src/lines.ts';
 
+const SHANGHAI = 'Asia/Shanghai';
+const NOON = Date.parse('2026-01-01T04:00:00Z'); // 12:00 +08:00
+const NIGHT = Date.parse('2026-01-01T15:00:00Z'); // 23:00 +08:00
+
 describe('肥鱼语录语料', () => {
-  it('收录 47 句,id 与文本都不重复', () => {
-    expect(FEIYU_LINES).toHaveLength(47);
-    expect(new Set(FEIYU_LINES.map((line) => line.id)).size).toBe(47);
-    expect(new Set(FEIYU_LINES.map((line) => line.text)).size).toBe(47);
+  it('收录 59 句(id 1–47 原文 + 48–59 补写),id 与文本都不重复', () => {
+    expect(FEIYU_LINES).toHaveLength(59);
+    expect(new Set(FEIYU_LINES.map((line) => line.id)).size).toBe(59);
+    expect(new Set(FEIYU_LINES.map((line) => line.text)).size).toBe(59);
   });
 
   it('每句都有至少一个主题标签,文本非空', () => {
@@ -53,5 +60,35 @@ describe('肥鱼语录语料', () => {
   it('摸头池包含被摸头的台词,睡觉池包含犯困台词', () => {
     expect(linesForTags(touchTags('pet')).some((line) => line.id === 16)).toBe(true);
     expect(linesForTags(['sleep', 'night']).some((line) => line.id === 28)).toBe(true);
+  });
+
+  it('夜间专用句(45)只在夜间窗口内允许出现', () => {
+    const care = lineById(45)!;
+    expect(lineAllowedAt(care, NOON, SHANGHAI, 22, 6)).toBe(false);
+    expect(lineAllowedAt(care, NIGHT, SHANGHAI, 22, 6)).toBe(true);
+    expect(lineAllowedAt(lineById(18)!, NOON, SHANGHAI, 22, 6)).toBe(true);
+  });
+
+  it('固定日程句(46)不参与随机挑选', () => {
+    expect(lineAllowedAt(lineById(46)!, NIGHT, SHANGHAI, 22, 6)).toBe(false);
+  });
+
+  it('冷却中的句子会被排除,只剩没冷却的', () => {
+    const lastSpokenAt = new Map<number, number>(
+      FEIYU_LINES.filter((line) => line.id !== 31).map((line) => [line.id, NOON]),
+    );
+    const picked = chooseLine({
+      tags: GENERAL_TAGS,
+      now: NOON + 1000,
+      timezone: SHANGHAI,
+      lastSpokenAt,
+      recentIds: [],
+      cooldownMs: 60_000,
+      nightStartHour: 22,
+      nightEndHour: 6,
+      tagBoost: 1,
+      random: () => 0,
+    });
+    expect(picked.id).toBe(31);
   });
 });
