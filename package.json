@@ -4,6 +4,15 @@
   "type": "module",
   "description": "Coopanion 桌宠的肥鱼语录:按动作和时段挑一句预置台词放进气泡,不调用模型,不花 token",
   "license": "MIT",
+  "author": "klebreis-fisher-martin",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/klebreis-fisher-martin/cortico-world-feiyu-whispers.git"
+  },
+  "homepage": "https://github.com/klebreis-fisher-martin/cortico-world-feiyu-whispers#readme",
+  "bugs": {
+    "url": "https://github.com/klebreis-fisher-martin/cortico-world-feiyu-whispers/issues"
+  },
   "keywords": [
     "cortico-world",
     "cortico",
